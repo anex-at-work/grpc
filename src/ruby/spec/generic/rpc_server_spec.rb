@@ -165,6 +165,25 @@ end
 
 BidiStub = BidiService.rpc_stub_class
 
+class KernelSystemService
+  include GRPC::GenericService
+  rpc :an_rpc, EchoMsg, EchoMsg
+  attr_reader :received_md
+
+  def initialize(_default_var = 'ignored')
+    @received_md = []
+  end
+
+  def an_rpc(req, call)
+    GRPC.logger.info('starting a Kernel.system rpc')
+    @received_md << call.metadata unless call.metadata.nil?
+    Kernel.system('')
+    req  # send back the req as the response
+  end
+end
+
+KernelSystemStub = KernelSystemService.rpc_stub_class
+
 describe GRPC::RpcServer do
   RpcServer = GRPC::RpcServer
   StatusCodes = GRPC::Core::StatusCodes
@@ -566,6 +585,18 @@ describe GRPC::RpcServer do
           '"bad response. (not an enumerable, client sees an error)"'
 
         expect(exception.inspect.include?(expected_details)).to be true
+        @srv.stop
+        t.join
+      end
+
+      it 'should continue to handle requests after any system calls' do
+        @srv.handle(KernelSystemService)
+        t = Thread.new { @srv.run }
+        @srv.wait_till_running
+        req = EchoMsg.new
+        n = 2  # arbitrary
+        stub = KernelSystemStub.new(@host, :this_channel_is_insecure, **client_opts)
+        n.times { expect(stub.an_rpc(req)).to be_a(EchoMsg) }
         @srv.stop
         t.join
       end
